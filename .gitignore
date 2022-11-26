@@ -1,0 +1,8 @@
+root/
+*.gz
+*.tar
+*.cpio
+bzImage
+vmlinux
+vmlinuz
+.gdb_history
