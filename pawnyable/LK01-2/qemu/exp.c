@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <sys/ioctl.h>
-#define BUFFER_SIZE 0x500
+#define BUFFER_SIZE 0x420
 static uint64_t kbase;
 static uint64_t g_buf;
 #define kaslr(addr) (kbase + addr)
